@@ -47,8 +47,8 @@ where the meaning of the arguments is as follows:
  - `num.threads`: By default, a single processor thread is used to parse the strings into numbers.
    If this is set to a number larger than one, this amount of threads will
    be used to parse this data, possibly offering a speedup. If the number
-   is zero or negative, the previous amount (other than one) of threads
-   will be used.
+   is zero or negative, the amount of cores as reported by [`detectCores`](http://stat.ethz.ch/R-manual/R-devel/library/parallel/html/detectCores.html)
+   function (from the `parallel` package) will be used.
 
 The function returns a list where each entry corresponds to a column in the CSV file. The
 columns that were marked as 'ignored', are _not_ present in this list.

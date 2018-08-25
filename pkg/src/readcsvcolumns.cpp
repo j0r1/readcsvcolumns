@@ -3,10 +3,6 @@
 #endif // _WIN32
 
 #include <Rcpp.h>
-#ifdef SUPPORT_OPENMP
-#include <omp.h>
-#endif // SUPPORT_OPENMP
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,6 +12,10 @@
 
 #ifndef _WIN32
 #include <sys/mman.h>
+#include <unistd.h>
+#include "jthread.h"
+
+using namespace jthread;
 #endif // _WIN32
 
 using namespace std;
@@ -60,6 +60,38 @@ private:
 	vector<double> m_vectorDouble;
 	vector<string> m_vectorString;
 };
+
+#ifndef _WIN32
+class ParserThread : public JThread
+{
+public:
+	ParserThread(vector<ValueVector> &cols, string &errStr, int tNum, int threads,
+	             char *pStartStr, int nCols, bool hasHeaders, int maxLen,
+		     const string &colSpec, volatile bool &intr) 
+		: columns(cols), errorString(errStr), threadNum(tNum), numThreads(threads), 
+		  numCols(nCols), maxLineLength(maxLen), pStr(pStartStr), columnSpec(colSpec),
+		  interrupt(intr)
+	{
+		lineNumber = (hasHeaders)?2:1;
+		m_endMutex.Init();
+	}
+
+	~ParserThread() { }
+
+	void runThread();
+	void *Thread();
+
+	JMutex m_endMutex;
+private:
+	vector<ValueVector> &columns;
+	string &errorString;
+	const int threadNum, numThreads, numCols, maxLineLength;
+	char *pStr;
+	int lineNumber;
+	string columnSpec;
+	volatile bool &interrupt;
+};
+#endif // !_WIN32
 
 inline char *ValueVector::skipWhite(char *pStr)
 {
@@ -341,6 +373,9 @@ inline char *gotoNextLine(char *pStr)
 // [[Rcpp::export]]
 List ReadCSVColumns(string fileName, string columnSpec, int maxLineLength, bool hasHeaders, int numThreads) 
 {
+	if (numThreads < 1)
+		Throw("Number of threads must be at least one");
+
 	if (maxLineLength <= 0)
 		Throw("Maximum line length must be larger than 0 (is %d)", maxLineLength);
 
@@ -368,14 +403,6 @@ List ReadCSVColumns(string fileName, string columnSpec, int maxLineLength, bool 
 		Throw("All columns will be ignored by the given column specification");
 
 	List listOfVectors;
-
-#ifndef SUPPORT_OPENMP
-	if (numThreads != 1)
-	{
-		numThreads = 1;
-		Rcerr << "No OpenMP support available for parallelisation, reverting to single thread" << endl;
-	}
-#endif // SUPPORT_OPENMP
 
 #ifdef _WIN32
 	if (numThreads != 1)
@@ -461,12 +488,7 @@ List ReadCSVColumns(string fileName, string columnSpec, int maxLineLength, bool 
 	}
 	else // Parallel version using mmap and openmp
 	{
-#if defined(SUPPORT_OPENMP) && !defined(_WIN32)
-		// If number of threads has been set explicitelym we pass this to OpenMP,
-		// otherwise, we'll use the currently set number
-		if (numThreads > 1)
-			omp_set_num_threads(numThreads);
-
+#ifndef _WIN32
 		int fileDesc = fileno(pFile);
 		if (fileDesc < 0)
 			Throw("Internal error: unable to get file descriptor of opened file");
@@ -488,7 +510,6 @@ List ReadCSVColumns(string fileName, string columnSpec, int maxLineLength, bool 
 
 		AutoUnMap autoUnMap(pMmapAddr, fileSize); // Make sure munmap is called when done
 
-		const int numThreads = omp_get_max_threads();
 		Rcout << "Using " << numThreads << " threads to parse fields" << endl;
 
 		char *pStrStart = (char *)pMmapAddr;
@@ -530,84 +551,20 @@ List ReadCSVColumns(string fileName, string columnSpec, int maxLineLength, bool 
 
 		volatile bool interrupt = false;
 
-		#pragma omp parallel
-		{
-			int lineNumber = (hasHeaders)?2:1;
-			char *pStr = pStrStart;
-			const int threadNum = omp_get_thread_num();
-			vector<ValueVector> &columns = threadColumns[threadNum];
-			vector<char> buffer(maxLineLength+1);
-			char *buff = &(buffer[0]);
+		vector<ParserThread *> parserThreads(numThreads);
+		for (int i = 0 ; i < numThreads ; i++)
+			parserThreads[i] = new ParserThread(threadColumns[i], errorReasons[i], i,
+			                          numThreads, pStrStart, numCols,hasHeaders, maxLineLength,
+				                  columnSpec, interrupt);
 
-			bool done = false;
-			for (int i = 0 ; i < threadNum ; i++) // skip a number of lines, so that each thread reads different lines
-			{
-				pStr = gotoNextLine(pStr);
-				if (*pStr == '\0')
-				{
-					done = true;
-					break;
-				}
-				lineNumber++;
-			}
+		for (int i = 0 ; i < numThreads ; i++)
+			parserThreads[i]->Start();
 
-			while (!done && !interrupt)
-			{
-				char *pEnd = gotoNextLine(pStr);
-				size_t lineLen = pEnd - pStr;
-
-				if (lineLen > maxLineLength)
-					lineLen = maxLineLength;
-
-				memcpy(buff, pStr, lineLen);
-				buff[lineLen] = 0;
-
-				char *pBuff = buff;
-				char *pPtr = 0;
-
-				//Rcout << "Thread " << omp_get_thread_num() << " reading line" << lineNumber << endl;
-
-				for (int i = 0 ; !done && i < numCols ; i++)
-				{
-					char *pPart = StrTok(pBuff, ',', &pPtr);
-					pBuff = 0;
-
-					if (!pPart)
-					{
-						done = true;
-						errorReasons[threadNum] = getString("Not enough columns on line %d", lineNumber);
-						interrupt = true;
-						break;
-					}
-
-					int colNum = i+1;
-					if (!columns[i].processWithCheck(pPart, colNum == numCols))
-					{
-						done = true;
-						errorReasons[threadNum] = getString("Unable to interpret '%s' (line %d, col %d) as type '%c'",
-						                                    pPart, lineNumber, colNum, columnSpec[i]);
-						interrupt = true;
-					}
-				}
-
-				lineNumber++;
-
-				for (int i = 1 ; !done && i < numThreads ; i++) // skip threads-1 lines
-				{
-					pEnd = gotoNextLine(pEnd);
-					if (*pEnd == '\0')
-					{
-						done = true;
-						break;
-					}
-					lineNumber++;
-				}
-				pStr = pEnd;
-			}
-
-			//Rcout << "Lines read: " << lineNumber << endl;
-		}
-		// End of threads
+		// Wait until everyone's done
+		for (int i = 0 ; i < numThreads ; i++)
+			parserThreads[i]->m_endMutex.Lock();
+		for (int i = 0 ; i < numThreads ; i++)
+			parserThreads[i]->m_endMutex.Unlock();
 
 		// Check if an error was encountered
 		for (int i = 0 ; i < numThreads ; i++)
@@ -641,7 +598,15 @@ List ReadCSVColumns(string fileName, string columnSpec, int maxLineLength, bool 
 
 		if (hasHeaders)
 			listOfVectors.attr("names") = nameVec;
-#endif // SUPPORT_OPENMP && !_WIN32
+
+		// Clean up threads
+		for (int i = 0 ; i < numThreads ; i++)
+		{
+			while (parserThreads[i]->IsRunning())
+				usleep(10);
+			delete parserThreads[i];
+		}
+#endif // !_WIN32
 	}
 
 	return listOfVectors;
@@ -999,4 +964,86 @@ inline char *StrTok(char *pStr, char delim, char **pSavePtr)
 	return NULL; // won't get here
 }
 
+#ifndef _WIN32
+void ParserThread::runThread()
+{
+	vector<char> buffer(maxLineLength+1);
+	char *buff = &(buffer[0]);
 
+	bool done = false;
+	for (int i = 0 ; i < threadNum ; i++) // skip a number of lines, so that each thread reads different lines
+	{
+		pStr = gotoNextLine(pStr);
+		if (*pStr == '\0')
+		{
+			done = true;
+			break;
+		}
+		lineNumber++;
+	}
+
+	while (!done && !interrupt)
+	{
+		char *pEnd = gotoNextLine(pStr);
+		size_t lineLen = pEnd - pStr;
+
+		if (lineLen > maxLineLength)
+			lineLen = maxLineLength;
+
+		memcpy(buff, pStr, lineLen);
+		buff[lineLen] = 0;
+
+		char *pBuff = buff;
+		char *pPtr = 0;
+
+		for (int i = 0 ; !done && i < numCols ; i++)
+		{
+			char *pPart = StrTok(pBuff, ',', &pPtr);
+			pBuff = 0;
+
+			if (!pPart)
+			{
+				done = true;
+				errorString = getString("Not enough columns on line %d", lineNumber);
+				interrupt = true;
+				break;
+			}
+
+			int colNum = i+1;
+			if (!columns[i].processWithCheck(pPart, colNum == numCols))
+			{
+				done = true;
+				errorString= getString("Unable to interpret '%s' (line %d, col %d) as type '%c'",
+					               pPart, lineNumber, colNum, columnSpec[i]);
+				interrupt = true;
+			}
+		}
+
+		lineNumber++;
+
+		for (int i = 1 ; !done && i < numThreads ; i++) // skip threads-1 lines
+		{
+			pEnd = gotoNextLine(pEnd);
+			if (*pEnd == '\0')
+			{
+				done = true;
+				break;
+			}
+			lineNumber++;
+		}
+		pStr = pEnd;
+	}
+
+	//Rcout << "Lines read: " << lineNumber << endl;
+}
+
+void *ParserThread::Thread()
+{
+	m_endMutex.Lock();
+	JThread::ThreadStarted();
+
+	runThread();
+	m_endMutex.Unlock();
+	return 0;
+}
+#endif // !_WIN32

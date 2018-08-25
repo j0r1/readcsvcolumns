@@ -1,15 +1,15 @@
 Package: readcsvcolumns
 Type: Package
 Title: Read CSV by specifying what type each column is
-Version: 1.2-1
-Date: 2015-01-04
+Version: 1.3-0
+Date: 2015-01-18
 Author: Jori Liesenborgs
 Maintainer: Jori Liesenborgs <jori.liesenborgs@uhasselt.be>
 Description: Read a CSV file by specifying in advance what the type
     of each column is (integer, real number or string). It is also
     possible to ignore certain columns.
 License: GPL-2
-Imports: Rcpp (>= 0.11.3)
+Imports: Rcpp (>= 0.11.3), parallel
 LinkingTo: Rcpp
 Suggests: knitr
 VignetteBuilder: knitr
