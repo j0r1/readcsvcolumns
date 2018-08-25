@@ -21,14 +21,16 @@ Usage
 
 The signature of the function is
 
-    read.csv.columns(file.name, column.types, max.line.length=16384, has.header=TRUE)
+    read.csv.columns(file.name, column.types="", max.line.length=16384, has.header=TRUE)
 
 where the meaning of the arguments is as follows:
 
  - `file.name`: the path to the CSV file
 
  - `column.types`: a string containing as many characters as there are columns in the
-   CSV file. The allowed characters and their meanings are:
+   CSV file. If this string is empty, the data type of each column will be guessed based
+   on the first line containing data. The allowed characters in this string and their 
+   meanings are:
 
     - `i`: the column contains integers
     - `r`: the column contains real numbers

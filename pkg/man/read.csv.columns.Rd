@@ -8,15 +8,17 @@
 	Read a CSV file by specifying the type of each column in advance.
 	A column type can specify that integer values should be read,
 	real numbers, or strings. It is also possible to specify that
-	certain columns should be ignored.
+	certain columns should be ignored. 
 }
 \usage{
-	read.csv.columns(file.name, column.types, max.line.length=16384, has.header=TRUE) 
+	read.csv.columns(file.name, column.types="", max.line.length=16384, has.header=TRUE) 
 }
 \arguments{
   \item{file.name}{The path to the CSV file which should be read.}
   \item{column.types}{A string with as many characters as columns in the CSV file, each
-                      character specifying the type of the column.}
+                      character specifying the type of the column. If left empty, an attempt
+		      will be made to guess the type of each column based on the first line
+		      containing data.}
   \item{max.line.length}{An upper limit to the length of each line in the CSV file, the
                          default is probably plenty.}
   \item{has.header}{If TRUE, the first line is considered to contain labels for the columns.

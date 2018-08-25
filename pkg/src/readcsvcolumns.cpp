@@ -79,13 +79,102 @@ void Throw(const char *format, ...)
 	throw Rcpp::exception(buf);
 }
 
+string GetColumnSpecAndColumnNames(string fileName, FILE *pFile, string columnSpec, bool hasHeaders, vector<string> &names)
+{
+	names.clear();
+	string line;
+
+	if (!ReadInputLine(pFile, line))
+		Throw("Unable to read first line from file '%s'", fileName.c_str());
+
+	vector<string> parts;
+	SplitLine(line, parts, ",", "\"'", "", false);
+
+	const size_t numCols = parts.size();
+
+	if (columnSpec.length() > 0)
+	{
+		if (columnSpec.length() != numCols)
+			Throw("Number of columns in first line (%u) is not equal to the column specification length (%u)", parts.size(), columnSpec.length());
+
+		if (!hasHeaders) // Need to rewind the file
+		{
+			if (fseek(pFile, 0, SEEK_SET) != 0)
+				Throw("Unable to rewind the file (needed after checking number of columns)");
+		}
+	}
+	else // try to guess the types
+	{
+		vector<string> guessParts = parts;		
+
+		if (hasHeaders) // In this case, we need the second line
+		{
+			if (!ReadInputLine(pFile, line))
+				Throw("Unable to read second line from file '%s' (needed to guess column types)", fileName.c_str());
+
+			SplitLine(line, guessParts, ",", "", "", false);
+			
+			if (guessParts.size() != parts.size())
+				Throw("First and second line in '%s' do not contain the same number of columns (%u vs %u)", fileName.c_str(), parts.size(), guessParts.size());
+		}
+
+		for (int i = 0 ; i < numCols ; i++)
+		{
+			ValueVector testVec;
+
+			testVec.setType(ValueVector::Integer);
+			if (testVec.processWithCheck(guessParts[i].c_str(), false))
+			{
+				columnSpec += "i";
+				continue;
+			}
+
+			testVec.setType(ValueVector::Double);
+			if (testVec.processWithCheck(guessParts[i].c_str(), false))
+			{
+				columnSpec += "r";
+				continue;
+			}
+
+			// If neither integer nor double works, lets use a string
+			columnSpec += "s";
+		}
+
+		Rcout << "Detected column specification is '" << columnSpec << "'" << endl;
+
+		if (fseek(pFile, 0, SEEK_SET) != 0)
+			Throw("Unable to rewind the file (needed after establising the column types)");
+
+		if (hasHeaders)
+		{
+			// In this case, we need to skip the first line again
+			if (!ReadInputLine(pFile, line))
+				Throw("Unable to re-read the first line (needed after establising the column types)");
+		}
+	}
+
+	if (hasHeaders)
+		names = parts;
+
+	return columnSpec;
+}
+
 // [[Rcpp::export]]
 List ReadCSVColumns(string fileName, string columnSpec, int maxLineLength, bool hasHeaders) 
 {
 	if (maxLineLength <= 0)
 		Throw("Maximum line length must be larger than 0 (is %d)", maxLineLength);
 
-	const int numCols = columnSpec.size();
+	FILE *pFile = fopen(fileName.c_str(), "rt");
+	if (!pFile)
+		Throw("Unable to open file '%s'", fileName.c_str());
+
+	AutoCloseFile autoCloser(pFile);
+	vector<string> names;
+
+	columnSpec = GetColumnSpecAndColumnNames(fileName, pFile, columnSpec, hasHeaders, names);
+
+	const size_t numCols = columnSpec.length();
 	vector<ValueVector> columns(numCols);
 
 	for (size_t i = 0 ; i < numCols ; i++)
@@ -109,31 +198,10 @@ List ReadCSVColumns(string fileName, string columnSpec, int maxLineLength, bool 
 		}
 	}
 
-	FILE *pFile = fopen(fileName.c_str(), "rt");
-	if (!pFile)
-		Throw("Unable to open file '%s'", fileName.c_str());
-
-	AutoCloseFile autoCloser(pFile);
-	string line;
-
-	if (!ReadInputLine(pFile, line))
-		Throw("Unable to read first line from file '%s'", fileName.c_str());
-
-	vector<string> parts;
-	SplitLine(line, parts, ",", "\"'", "", false);
-
-	if (parts.size() != numCols)
-		Throw("Number of columns in first line (%u) is not equal to the column specification length (%d)", parts.size(), numCols);
-	
 	if (hasHeaders)
 	{
 		for (size_t i = 0 ; i < numCols ; i++)
-			columns[i].setName(parts[i]);
-	}
-	else
-	{
-		if (fseek(pFile, 0, SEEK_SET))
-			Throw("Unable to rewind the file (needed after establising the number of columns)");
+			columns[i].setName(names[i]);
 	}
 
 	vector<char> buffer(maxLineLength);
@@ -171,7 +239,7 @@ List ReadCSVColumns(string fileName, string columnSpec, int maxLineLength, bool 
 	//cout << "Data loaded, storing in R struct" << endl;
 
 	List listOfVectors;
-	CharacterVector names;
+	CharacterVector nameVec;
 
 	size_t listPos = 0;
 	for (size_t i = 0 ; i < columns.size() ; i++)
@@ -179,7 +247,7 @@ List ReadCSVColumns(string fileName, string columnSpec, int maxLineLength, bool 
 		if (!columns[i].ignore())
 		{
 			if (hasHeaders)
-				names.push_back(columns[i].getName());
+				nameVec.push_back(columns[i].getName());
 
 			columns[i].addColumnToList(listOfVectors);
 			listPos++;
@@ -187,7 +255,7 @@ List ReadCSVColumns(string fileName, string columnSpec, int maxLineLength, bool 
 	}
 
 	if (hasHeaders)
-		listOfVectors.attr("names") = names;
+		listOfVectors.attr("names") = nameVec;
 
 	return listOfVectors;
 }

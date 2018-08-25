@@ -173,7 +173,7 @@ specify in advance what type each column is.</p>
 
 <p>The signature of the function is</p>
 
-<pre><code>read.csv.columns(file.name, column.types, max.line.length=16384, has.header=TRUE)
+<pre><code>read.csv.columns(file.name, column.types=&quot;&quot;, max.line.length=16384, has.header=TRUE)
 </code></pre>
 
 <p>where the meaning of the arguments is as follows:</p>
@@ -181,7 +181,9 @@ specify in advance what type each column is.</p>
 <ul>
 <li><p><code>file.name</code>: the path to the CSV file</p></li>
 <li><p><code>column.types</code>: a string containing as many characters as there are columns in the
-CSV file. The allowed characters and their meanings are:</p>
+CSV file. If this string is empty, the data type of each column will be guessed based
+on the first line containing data. The allowed characters in this string and their 
+meanings are:</p>
 
 <ul>
 <li><code>i</code>: the column contains integers</li>
