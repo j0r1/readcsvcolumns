@@ -1,8 +1,8 @@
 Package: readcsvcolumns
 Type: Package
 Title: Read CSV by specifying what type each column is
-Version: 1.2-0
-Date: 2015-01-03
+Version: 1.2-1
+Date: 2015-01-04
 Author: Jori Liesenborgs
 Maintainer: Jori Liesenborgs <jori.liesenborgs@uhasselt.be>
 Description: Read a CSV file by specifying in advance what the type

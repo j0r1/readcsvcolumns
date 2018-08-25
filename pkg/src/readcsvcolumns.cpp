@@ -14,11 +14,8 @@
 #include <string>
 #include <iostream>
 
-#ifdef _WIN32
-#define STRTOK_R strtok_s
-#else
+#ifndef _WIN32
 #include <sys/mman.h>
-#define STRTOK_R strtok_r
 #endif // _WIN32
 
 using namespace std;
@@ -29,6 +26,7 @@ using namespace Rcpp;
 bool ReadInputLine(FILE *fi, string &line);
 void SplitLine(const string &line, vector<string> &args, const string &separatorChars,
 	       const string &quoteChars, const string &commentStartChars, bool ignoreZeroLengthFields);
+char *StrTok(char *pStr, char delim, char **pSavePtr);
 
 class ValueVector
 {
@@ -426,7 +424,7 @@ List ReadCSVColumns(string fileName, string columnSpec, int maxLineLength, bool 
 
 			for (int i = 0 ; i < numCols ; i++)
 			{
-				char *pPart = STRTOK_R(pBuff, ",", &pPtr);
+				char *pPart = StrTok(pBuff, ',', &pPtr);
 				pBuff = 0;
 
 				if (!pPart)
@@ -571,7 +569,7 @@ List ReadCSVColumns(string fileName, string columnSpec, int maxLineLength, bool 
 
 				for (int i = 0 ; !done && i < numCols ; i++)
 				{
-					char *pPart = STRTOK_R(pBuff, ",", &pPtr);
+					char *pPart = StrTok(pBuff, ',', &pPtr);
 					pBuff = 0;
 
 					if (!pPart)
@@ -627,7 +625,6 @@ List ReadCSVColumns(string fileName, string columnSpec, int maxLineLength, bool 
 		}
 
 		Rcout << "Read " << totalEntries << " data lines" << endl;
-
 
 		CharacterVector nameVec;
 		for (size_t i = 0 ; i < numCols ; i++)
@@ -971,4 +968,35 @@ void ValueVector::addColumnToList(List &listOfVectors, int numThreads, int threa
 		throw Rcpp::exception("Internal error: unknown m_vectorType in addColumnToList2");
 	}
 }
+
+inline char *StrTok(char *pStr, char delim, char **pSavePtr)
+{
+	char *pStart = pStr;
+	if (pStr == 0)
+		pStart = *pSavePtr;
+
+	char *pPos = pStart;
+	while (1)
+	{
+		char c = *pPos;
+
+		if (c == delim)
+		{
+			*pPos = 0;
+			*pSavePtr = pPos+1;
+			return pStart;
+		}
+		if (c == '\0')
+		{
+			*pSavePtr = pPos;
+			if (pPos == pStart)
+				return NULL;
+			return pStart;
+		}
+		pPos++;
+	}
+
+	return NULL; // won't get here
+}
+
 
