@@ -7,6 +7,12 @@ import shutil
 import buildsrcdist
 import platform
 
+def getRVersion():
+    txt = subprocess.check_output([ "R", "--version" ], stderr = subprocess.STDOUT)
+    fullVersion = txt.splitlines()[0].split()[2]
+    versionNumbers = map(int,fullVersion.split("."))
+    return "{}.{}".format(*versionNumbers)
+
 def getPackageFileName(logFileName):
     with open(logFileName, "rt") as f:
         l = f.readline()
@@ -31,6 +37,9 @@ def getPackageFileName(logFileName):
             l = f.readline()
 
 def main():
+    Rversion = getRVersion()
+    print("R {}".format(Rversion))
+
     instDir = sys.argv[1]
 
     os.mkdir(instDir)
@@ -57,13 +66,13 @@ def main():
     print("Package name is %s" % pkgFile)
 
     if platform.system() == "Windows": # Windows
-        os.makedirs("bin/windows/contrib/3.1/")
-        shutil.move(pkgFile, "bin/windows/contrib/3.1/")
+        os.makedirs("bin/windows/contrib/{}/".format(Rversion))
+        shutil.move(pkgFile, "bin/windows/contrib/{}/".format(Rversion))
     elif platform.system() == "Darwin": # OS X
-        os.makedirs("bin/macosx/mavericks/contrib/3.1/")
-        os.makedirs("bin/macosx/contrib/3.0/")
-        shutil.copy(pkgFile, "bin/macosx/mavericks/contrib/3.1/")
-        shutil.move(pkgFile, "bin/macosx/contrib/3.0/")
+        os.makedirs("bin/macosx/mavericks/contrib/{}/".format(Rversion))
+        #os.makedirs("bin/macosx/contrib/3.0/")
+        #shutil.copy(pkgFile, "bin/macosx/contrib/3.0/")
+        shutil.move(pkgFile, "bin/macosx/mavericks/contrib/{}/".format(Rversion))
     else:
         print("Unknown platform, not creating directory structure")
 

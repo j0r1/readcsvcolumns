@@ -170,15 +170,31 @@ inline bool ValueVector::parseAsDouble(const char *pStr, double &value)
 		// Will not strictly be correct since we've already skipped
 		// whitespace, so '1.    #INF' will also be detected as
 		// infinity
-		if (endptr[0] == '#' && endptr[1] == 'I' && endptr[2] == 'N')
+		if (endptr[0] == '#')
 		{
-			if (endptr[3] == 'F') // #INF
+			if (endptr[1] == 'I' && endptr[2] == 'N')
 			{
-				// assume its +/- inf, without further checking
-				value = (value < 0)?(-std::numeric_limits<double>::infinity()):(std::numeric_limits<double>::infinity());
+				if (endptr[3] == 'F') // #INF
+				{
+					// assume its +/- inf, without further checking
+					value = (value < 0)?(-std::numeric_limits<double>::infinity()):(std::numeric_limits<double>::infinity());
+					return true;
+				}
+				if (endptr[3] == 'D') // #IND
+				{
+					// Assume it's NaN
+					value = std::numeric_limits<double>::quiet_NaN();
+					return true;
+				}
+			}
+
+			if (endptr[1] == 'Q' && endptr[2] == 'N' && endptr[3] == 'A' && endptr[4] == 'N') // #QNAN
+			{
+				// Assume it's NaN
+				value = std::numeric_limits<double>::quiet_NaN();
 				return true;
 			}
-			if (endptr[3] == 'D') // #IND
+			if (endptr[1] == 'S' && endptr[2] == 'N' && endptr[3] == 'A' && endptr[4] == 'N') // #SNAN
 			{
 				// Assume it's NaN
 				value = std::numeric_limits<double>::quiet_NaN();
