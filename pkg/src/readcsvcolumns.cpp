@@ -183,7 +183,7 @@ inline bool ValueVector::parseAsDouble(const char *pStr, double &value)
 				if (endptr[3] == 'D') // #IND
 				{
 					// Assume it's NaN
-					value = std::numeric_limits<double>::quiet_NaN();
+					value = (value < 0)?(-std::numeric_limits<double>::quiet_NaN()):(std::numeric_limits<double>::quiet_NaN());
 					return true;
 				}
 			}
@@ -191,13 +191,13 @@ inline bool ValueVector::parseAsDouble(const char *pStr, double &value)
 			if (endptr[1] == 'Q' && endptr[2] == 'N' && endptr[3] == 'A' && endptr[4] == 'N') // #QNAN
 			{
 				// Assume it's NaN
-				value = std::numeric_limits<double>::quiet_NaN();
+				value = (value < 0)?(-std::numeric_limits<double>::quiet_NaN()):(std::numeric_limits<double>::quiet_NaN());
 				return true;
 			}
 			if (endptr[1] == 'S' && endptr[2] == 'N' && endptr[3] == 'A' && endptr[4] == 'N') // #SNAN
 			{
 				// Assume it's NaN
-				value = std::numeric_limits<double>::quiet_NaN();
+				value = (value < 0)?(-std::numeric_limits<double>::quiet_NaN()):(std::numeric_limits<double>::quiet_NaN());
 				return true;
 			}
 		}
