@@ -3,9 +3,9 @@
 
 using namespace Rcpp;
 
-List ReadCSVColumns(std::string fileName, std::string columnSpec, int maxLineLength, bool hasHeaders);
+List ReadCSVColumns(std::string fileName, std::string columnSpec, int maxLineLength, bool hasHeaders, int numThreads);
 
-RcppExport SEXP RReadCSVColumns(SEXP fileName, SEXP columnSpec, SEXP maxLineLength, SEXP hasHeaders) 
+RcppExport SEXP RReadCSVColumns(SEXP fileName, SEXP columnSpec, SEXP maxLineLength, SEXP hasHeaders, SEXP numThreads) 
 {
 BEGIN_RCPP
 
@@ -15,7 +15,8 @@ BEGIN_RCPP
         List __result = ReadCSVColumns(Rcpp::as<std::string>(fileName), 
 			               Rcpp::as<std::string>(columnSpec),
 				       Rcpp::as<int>(maxLineLength),
-				       Rcpp::as<bool>(hasHeaders));
+				       Rcpp::as<bool>(hasHeaders),
+				       Rcpp::as<int>(numThreads));
         PROTECT(__sexp_result = Rcpp::wrap(__result));
     }
     UNPROTECT(1);

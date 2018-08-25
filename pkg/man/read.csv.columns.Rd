@@ -11,7 +11,7 @@
 	certain columns should be ignored. 
 }
 \usage{
-	read.csv.columns(file.name, column.types="", max.line.length=16384, has.header=TRUE) 
+	read.csv.columns(file.name, column.types="", max.line.length=16384, has.header=TRUE, num.threads=1) 
 }
 \arguments{
   \item{file.name}{The path to the CSV file which should be read.}
@@ -23,6 +23,11 @@
                          default is probably plenty.}
   \item{has.header}{If TRUE, the first line is considered to contain labels for the columns.
                     Set this to FALSE if the CSV file contains only data, no column names.}
+  \item{num.threads}{By default, a single processor thread is used to parse the strings into numbers.
+                     If this is set to a number larger than one, this amount of threads will
+		     be used to parse this data, possibly offering a speedup. If the number
+		     is zero or negative, the previous amount (other than one) of threads
+		     will be used.}
 }
 \details{
 	The characters in the \code{column.types} string can be the following:

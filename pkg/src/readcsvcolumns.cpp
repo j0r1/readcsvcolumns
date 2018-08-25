@@ -3,6 +3,10 @@
 #endif // _WIN32
 
 #include <Rcpp.h>
+#ifdef SUPPORT_OPENMP
+#include <omp.h>
+#endif // SUPPORT_OPENMP
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,6 +17,7 @@
 #ifdef _WIN32
 #define STRTOK_R strtok_s
 #else
+#include <sys/mman.h>
 #define STRTOK_R strtok_r
 #endif // _WIN32
 
@@ -42,7 +47,10 @@ public:
 	const string getName() const 					{ return m_name; }
 
 	void addColumnToList(List &listOfVectors);
+	void addColumnToList(List &listOfVectors, int numThreads, int thread, int totalEntries);
+	int getEntries() const;
 private:
+	static char *skipWhite(char *pStr);
 	static const char *skipWhite(const char *pStr);
 	static bool parseAsInt(const char *pStr, int &value);
 	static bool parseAsDouble(const char *pStr, double &value);
@@ -55,14 +63,153 @@ private:
 	vector<string> m_vectorString;
 };
 
+inline char *ValueVector::skipWhite(char *pStr)
+{
+	while (1)
+	{
+		char c = *pStr;
+		if (c == '\0' || !(c == ' ' || c == '\t' || c == '\r' || c == '\n'))
+			break;
+		pStr++;
+	}
+	return pStr;
+}
+
+inline const char *ValueVector::skipWhite(const char *pStr)
+{
+	while (1)
+	{
+		char c = *pStr;
+		if (c == '\0' || !(c == ' ' || c == '\t' || c == '\r' || c == '\n'))
+			break;
+		pStr++;
+	}
+	return pStr;
+}
+
+inline bool ValueVector::parseAsInt(const char *pStr, int &value)
+{
+	pStr = skipWhite(pStr);
+	if (*pStr == '\0')
+		return false;
+
+	char *endptr;
+	long int v = strtol(pStr,&endptr,10); // base 10
+	endptr = skipWhite(endptr);
+
+	if (*endptr != '\0')
+	{
+		if (endptr[0] == 'N' && endptr[1] == 'A')
+		{
+			char c = endptr[2];
+
+			if (c == '\0' || c == ' ' || c == '\t' || c == '\r' || c == '\n') // Assume it's just NA
+			{
+				value = NA_INTEGER;
+				return true;
+			}
+		}
+		
+		return false;
+	}
+
+	value = (int)v;
+	if ((long)value != v) // Doesn't fit in an 'int'
+		return false;
+
+	if (value == NA_INTEGER) // Reserved!
+		return false;
+
+	return true;
+}
+
+inline bool ValueVector::parseAsDouble(const char *pStr, double &value)
+{
+	pStr = skipWhite(pStr);
+	if (*pStr == '\0')
+		return false;
+
+	char *endptr;
+	
+	value = strtod(pStr, &endptr);
+	endptr = skipWhite(endptr);
+
+	if (*endptr != '\0')
+	{
+		// Try to compensate for things like 1.#INF on windows
+		// Will not strictly be correct since we've already skipped
+		// whitespace, so '1.    #INF' will also be detected as
+		// infinity
+		if (endptr[0] == '#' && endptr[1] == 'I' && endptr[2] == 'N')
+		{
+			if (endptr[3] == 'F') // #INF
+			{
+				// assume its +/- inf, without further checking
+				value = (value < 0)?(-std::numeric_limits<double>::infinity()):(std::numeric_limits<double>::infinity());
+				return true;
+			}
+			if (endptr[3] == 'D') // #IND
+			{
+				// Assume it's NaN
+				value = std::numeric_limits<double>::quiet_NaN();
+				return true;
+			}
+		}
+
+		if (endptr[0] == 'N' && endptr[1] == 'A')
+		{
+			char c = endptr[2];
+
+			if (c == '\0' || c == ' ' || c == '\t' || c == '\r' || c == '\n') // Assume it's just NA
+			{
+				value = NA_REAL;
+				return true;
+			}
+		}
+
+		return false;
+	}
+	
+	return true;
+}
+
+inline int ValueVector::getEntries() const
+{
+	switch(m_vectorType)
+	{
+	case Ignore:
+		return 0;
+	case Integer:
+		return m_vectorInt.size();
+	case Double:
+		return m_vectorDouble.size();
+	case String:
+		return m_vectorString.size();
+	default:
+		throw Rcpp::exception("Internal error: unknown m_vectorType in getEntries");
+	}
+}
+
 class AutoCloseFile
 {
 public:
-	AutoCloseFile(FILE *pFile) : m_pFile(pFile) 			{ }
-	~AutoCloseFile() 						{ if (m_pFile) fclose(m_pFile); }
+	AutoCloseFile(FILE *pFile) : m_pFile(pFile) 					{ }
+	~AutoCloseFile() 								{ if (m_pFile) fclose(m_pFile); }
 private:
 	FILE *m_pFile;
 };
+
+#ifndef _WIN32
+class AutoUnMap
+{
+public:
+	AutoUnMap(void *pMmapAddr, size_t len) : m_pMmapAddr(pMmapAddr), m_len(len)	{ }
+	~AutoUnMap()									{ munmap(m_pMmapAddr, m_len); }
+private:
+	void *m_pMmapAddr;
+	size_t m_len;
+};
+#endif // !_WIN32
 
 void Throw(const char *format, ...)
 {
@@ -77,6 +224,19 @@ void Throw(const char *format, ...)
 
 	buf[MAXLEN-1] = 0;
 	throw Rcpp::exception(buf);
+}
+
+string getString(const char *format, ...)
+{
+        va_list ap;
+	char buf[MAXLEN];
+
+        va_start(ap, format);
+        vsnprintf(buf, MAXLEN, format, ap);
+        va_end(ap);
+
+	buf[MAXLEN-1] = 0;
+	return string(buf);
 }
 
 string GetColumnSpecAndColumnNames(string fileName, FILE *pFile, string columnSpec, bool hasHeaders, vector<string> &names)
@@ -159,8 +319,29 @@ string GetColumnSpecAndColumnNames(string fileName, FILE *pFile, string columnSp
 	return columnSpec;
 }
 
+inline char *gotoNextLine(char *pStr)
+{
+	char c = '\0';
+	while (1)
+	{
+		c = *pStr;
+		if (c == '\0')
+			break;
+
+		if (c == '\n')
+		{
+			pStr++;
+			break;
+		}
+
+		pStr++;
+	}
+
+	return pStr;
+}
+
 // [[Rcpp::export]]
-List ReadCSVColumns(string fileName, string columnSpec, int maxLineLength, bool hasHeaders) 
+List ReadCSVColumns(string fileName, string columnSpec, int maxLineLength, bool hasHeaders, int numThreads) 
 {
 	if (maxLineLength <= 0)
 		Throw("Maximum line length must be larger than 0 (is %d)", maxLineLength);
@@ -173,89 +354,298 @@ List ReadCSVColumns(string fileName, string columnSpec, int maxLineLength, bool 
 	vector<string> names;
 
 	columnSpec = GetColumnSpecAndColumnNames(fileName, pFile, columnSpec, hasHeaders, names);
-
 	const size_t numCols = columnSpec.length();
-	vector<ValueVector> columns(numCols);
 
+	if (numCols == 0)
+		Throw("No columns found in file '%s'", fileName.c_str());
+
+	size_t ignoreColumns = 0;
 	for (size_t i = 0 ; i < numCols ; i++)
 	{
-		switch(columnSpec[i])
-		{
-		case 'i':
-			columns[i].setType(ValueVector::Integer);
-			break;
-		case 'r':
-			columns[i].setType(ValueVector::Double);
-			break;
-		case 's':
-			columns[i].setType(ValueVector::String);
-			break;
-		case '.':
-			columns[i].setType(ValueVector::Ignore);
-			break;
-		default:
-			Throw("Invalid column type '%c'", columnSpec[i]);
-		}
+		if (columnSpec[i] == '.')
+			ignoreColumns++;
 	}
 
-	if (hasHeaders)
+	if (ignoreColumns == numCols)
+		Throw("All columns will be ignored by the given column specification");
+
+	List listOfVectors;
+
+#ifndef SUPPORT_OPENMP
+	if (numThreads != 1)
 	{
+		numThreads = 1;
+		Rcerr << "No OpenMP support available for parallelisation, reverting to single thread" << endl;
+	}
+#endif // SUPPORT_OPENMP
+
+#ifdef _WIN32
+	if (numThreads != 1)
+	{
+		numThreads = 1;
+		Rcerr << "Parellel interpretation of numbers is not available on Win32 platform, reverting to single thread" << endl;
+	}
+#endif // _WIN32
+
+	if (numThreads == 1)
+	{
+		vector<ValueVector> columns(numCols);
+		vector<char> buffer(maxLineLength);
+		char *buff = &(buffer[0]);
+
 		for (size_t i = 0 ; i < numCols ; i++)
-			columns[i].setName(names[i]);
-	}
-
-	vector<char> buffer(maxLineLength);
-	char *buff = &(buffer[0]);
-	int lineNumber = 2;
-	int numElements = 0;
-
-	while (fgets(buff, maxLineLength, pFile))
-	{
-		buff[maxLineLength-1] = 0;
-
-		char *pBuff = buff;
-		char *pPtr = 0;
-
-		for (int i = 0 ; i < numCols ; i++)
 		{
-			char *pPart = STRTOK_R(pBuff, ",", &pPtr);
-			pBuff = 0;
-
-			if (!pPart)
-				Throw("Not enough columns on line %d", lineNumber);
-
-			int colNum = i+1;
-			if (!columns[i].processWithCheck(pPart, colNum == numCols))
+			switch(columnSpec[i])
 			{
-				Throw("Unable to interpret '%s' (line %d, col %d) as type '%c'",
-				      pPart, lineNumber, colNum, columnSpec[i]);
+			case 'i':
+				columns[i].setType(ValueVector::Integer);
+				break;
+			case 'r':
+				columns[i].setType(ValueVector::Double);
+				break;
+			case 's':
+				columns[i].setType(ValueVector::String);
+				break;
+			case '.':
+				columns[i].setType(ValueVector::Ignore);
+				break;
+			default:
+				Throw("Invalid column type '%c'", columnSpec[i]);
 			}
 		}
 
-		lineNumber++;
-		numElements++;
-	}
+		int lineNumber = 2;
+		int numElements = 0;
 
-	//cout << "Data loaded, storing in R struct" << endl;
-
-	List listOfVectors;
-	CharacterVector nameVec;
-
-	size_t listPos = 0;
-	for (size_t i = 0 ; i < columns.size() ; i++)
-	{
-		if (!columns[i].ignore())
+		while (fgets(buff, maxLineLength, pFile))
 		{
-			if (hasHeaders)
-				nameVec.push_back(columns[i].getName());
+			buff[maxLineLength-1] = 0;
 
-			columns[i].addColumnToList(listOfVectors);
-			listPos++;
+			char *pBuff = buff;
+			char *pPtr = 0;
+
+			for (int i = 0 ; i < numCols ; i++)
+			{
+				char *pPart = STRTOK_R(pBuff, ",", &pPtr);
+				pBuff = 0;
+
+				if (!pPart)
+					Throw("Not enough columns on line %d", lineNumber);
+
+				int colNum = i+1;
+				if (!columns[i].processWithCheck(pPart, colNum == numCols))
+				{
+					Throw("Unable to interpret '%s' (line %d, col %d) as type '%c'",
+					      pPart, lineNumber, colNum, columnSpec[i]);
+				}
+			}
+
+			lineNumber++;
+			numElements++;
 		}
-	}
 
-	if (hasHeaders)
-		listOfVectors.attr("names") = nameVec;
+		//cout << "Data loaded, storing in R struct" << endl;
+
+		CharacterVector nameVec;
+		for (size_t i = 0 ; i < columns.size() ; i++)
+		{
+			if (!columns[i].ignore())
+			{
+				if (hasHeaders)
+					nameVec.push_back(names[i]);
+
+				columns[i].addColumnToList(listOfVectors);
+			}
+		}
+
+		if (hasHeaders)
+			listOfVectors.attr("names") = nameVec;
+	}
+	else // Parallel version using mmap and openmp
+	{
+#if defined(SUPPORT_OPENMP) && !defined(_WIN32)
+		// If number of threads has been set explicitelym we pass this to OpenMP,
+		// otherwise, we'll use the currently set number
+		if (numThreads > 1)
+			omp_set_num_threads(numThreads);
+
+		int fileDesc = fileno(pFile);
+		if (fileDesc < 0)
+			Throw("Internal error: unable to get file descriptor of opened file");
+
+		if (fseek(pFile, 0, SEEK_END) != 0)
+			Throw("Couldn't seek to the end of the file");
+
+		long fileSize = ftell(pFile);
+		
+		// Using fileSize+1 to make sure it's zero-terminated
+		// From Linux manual page:
+		//   For a file that is not a multiple of the page  size,  the  remaining  memory  
+		//   is  zeroed
+		// From OS X manual page:
+		//   'Any extension beyond the end of the mapped object will be zero-filled.
+		void *pMmapAddr = mmap(0, fileSize+1, PROT_READ, MAP_PRIVATE, fileDesc, 0);
+		if (pMmapAddr == 0)
+			Throw("Unable to use 'mmap' to access file");
+
+		AutoUnMap autoUnMap(pMmapAddr, fileSize); // Make sure munmap is called when done
+
+		const int numThreads = omp_get_max_threads();
+		Rcout << "Using " << numThreads << " threads to parse fields" << endl;
+
+		char *pStrStart = (char *)pMmapAddr;
+		if (hasHeaders)
+			pStrStart = gotoNextLine(pStrStart);
+
+		vector<vector<ValueVector> > threadColumns(numThreads);
+		vector<string> errorReasons(numThreads);
+
+		size_t lastRealColumn = 0;
+
+		for (size_t t = 0 ; t < numThreads ; t++)
+		{
+			threadColumns[t].resize(numCols);
+			for (size_t i = 0 ; i < numCols ; i++)
+			{
+				switch(columnSpec[i])
+				{
+				case 'i':
+					threadColumns[t][i].setType(ValueVector::Integer);
+					lastRealColumn = i;
+					break;
+				case 'r':
+					threadColumns[t][i].setType(ValueVector::Double);
+					lastRealColumn = i;
+					break;
+				case 's':
+					threadColumns[t][i].setType(ValueVector::String);
+					lastRealColumn = i;
+					break;
+				case '.':
+					threadColumns[t][i].setType(ValueVector::Ignore);
+					break;
+				default:
+					Throw("Invalid column type '%c'", columnSpec[i]);
+				}
+			}
+		}
+
+		volatile bool interrupt = false;
+
+		#pragma omp parallel
+		{
+			int lineNumber = (hasHeaders)?2:1;
+			char *pStr = pStrStart;
+			const int threadNum = omp_get_thread_num();
+			vector<ValueVector> &columns = threadColumns[threadNum];
+			vector<char> buffer(maxLineLength+1);
+			char *buff = &(buffer[0]);
+
+			bool done = false;
+			for (int i = 0 ; i < threadNum ; i++) // skip a number of lines, so that each thread reads different lines
+			{
+				pStr = gotoNextLine(pStr);
+				if (*pStr == '\0')
+				{
+					done = true;
+					break;
+				}
+				lineNumber++;
+			}
+
+			while (!done && !interrupt)
+			{
+				char *pEnd = gotoNextLine(pStr);
+				size_t lineLen = pEnd - pStr;
+
+				if (lineLen > maxLineLength)
+					lineLen = maxLineLength;
+
+				memcpy(buff, pStr, lineLen);
+				buff[lineLen] = 0;
+
+				char *pBuff = buff;
+				char *pPtr = 0;
+
+				//Rcout << "Thread " << omp_get_thread_num() << " reading line" << lineNumber << endl;
+
+				for (int i = 0 ; !done && i < numCols ; i++)
+				{
+					char *pPart = STRTOK_R(pBuff, ",", &pPtr);
+					pBuff = 0;
+
+					if (!pPart)
+					{
+						done = true;
+						errorReasons[threadNum] = getString("Not enough columns on line %d", lineNumber);
+						interrupt = true;
+						break;
+					}
+
+					int colNum = i+1;
+					if (!columns[i].processWithCheck(pPart, colNum == numCols))
+					{
+						done = true;
+						errorReasons[threadNum] = getString("Unable to interpret '%s' (line %d, col %d) as type '%c'",
+						                                    pPart, lineNumber, colNum, columnSpec[i]);
+						interrupt = true;
+					}
+				}
+
+				lineNumber++;
+
+				for (int i = 1 ; !done && i < numThreads ; i++) // skip threads-1 lines
+				{
+					pEnd = gotoNextLine(pEnd);
+					if (*pEnd == '\0')
+					{
+						done = true;
+						break;
+					}
+					lineNumber++;
+				}
+				pStr = pEnd;
+			}
+
+			//Rcout << "Lines read: " << lineNumber << endl;
+		}
+		// End of threads
+
+		// Check if an error was encountered
+		for (int i = 0 ; i < numThreads ; i++)
+		{
+			if (errorReasons[i].length() > 0)
+				Throw(errorReasons[i].c_str());
+		}
+
+		int totalEntries = 0;
+		for (int i = 0 ; i < numThreads ; i++)
+		{
+			// Each column will have the same number of entries, except for columns which are
+			// ignored
+			totalEntries += threadColumns[i][lastRealColumn].getEntries(); 
+		}
+
+		Rcout << "Read " << totalEntries << " data lines" << endl;
+
+
+		CharacterVector nameVec;
+		for (size_t i = 0 ; i < numCols ; i++)
+		{
+			if (!threadColumns[0][i].ignore()) // It's ignored in all threads
+			{
+				if (hasHeaders)
+					nameVec.push_back(names[i]);
+
+				for (int t = 0 ; t < numThreads ; t++)
+					threadColumns[t][i].addColumnToList(listOfVectors, numThreads, t, totalEntries);
+			}
+		}
+
+		if (hasHeaders)
+			listOfVectors.attr("names") = nameVec;
+#endif // SUPPORT_OPENMP && !_WIN32
+	}
 
 	return listOfVectors;
 }
@@ -527,79 +917,58 @@ void ValueVector::addColumnToList(List &listOfVectors)
 
 }
 
-inline const char *ValueVector::skipWhite(const char *pStr)
+void ValueVector::addColumnToList(List &listOfVectors, int numThreads, int thread, int totalEntries)
 {
-	while (1)
+	// thread 0 should create the new vector, the other threads should use the last added vector
+
+	switch(m_vectorType)
 	{
-		char c = *pStr;
-		if (c == '\0' || !(c == ' ' || c == '\t' || c == '\r' || c == '\n'))
-			break;
-		pStr++;
-	}
-	return pStr;
-}
-
-bool ValueVector::parseAsInt(const char *pStr, int &value)
-{
-	pStr = skipWhite(pStr);
-	if (*pStr == '\0')
-		return false;
-
-	char *endptr;
-	long int v = strtol(pStr,&endptr,10); // base 10
-	const char *endptr2 = skipWhite(endptr);
-
-	if (*endptr2 != '\0')
-		return false;
-
-	value = (int)v;
-
-	if ((long)value != v)
-		return false;
-
-	return true;
-}
-
-bool ValueVector::parseAsDouble(const char *pStr, double &value)
-{
-	pStr = skipWhite(pStr);
-	if (*pStr == '\0')
-		return false;
-
-	char *endptr;
-	
-	value = strtod(pStr, &endptr);
-	const char *endptr2 = skipWhite(endptr);
-
-	if (*endptr2 != '\0')
-	{
-		// Try to compensate for things like 1.#INF on windows
-		// Will not strictly be correct since we've already skipped
-		// whitespace, so '1.    #INF' will also be detected as
-		// infinity
-		if (endptr2[0] == '#' && endptr2[1] == 'I' && endptr2[2] == 'N')
+	case Ignore:
+		throw Rcpp::exception("Internal error: 'Ignore' should not be used in addColumnToList");
+	case Integer:
 		{
-			if (endptr2[3] == 'F') // #INF
-			{
-				// assume its +/- inf, without further checking
-				if (value < 0)
-				{
-					value = -std::numeric_limits<double>::infinity();
-					return true;
-				}
-				value = std::numeric_limits<double>::infinity();
-				return true;
-			}
-			if (endptr2[3] == 'D') // #IND
-			{
-				// Assume it's NaN
-				value = std::numeric_limits<double>::quiet_NaN();
-				return true;
-			}
-		}
-		return false;
-	}
-	return true;
-}
+			if (thread == 0)
+				listOfVectors.push_back(IntegerVector(totalEntries));
 
+			IntegerVector v = listOfVectors[listOfVectors.size()-1];
+
+			const int num = m_vectorInt.size();
+			int outPos = thread;
+
+			for (int i = 0 ; i < num ; i++, outPos += numThreads)
+				v[outPos] = m_vectorInt[i];
+		}
+		break;
+	case Double:
+		{
+			if (thread == 0)
+				listOfVectors.push_back(NumericVector(totalEntries));
+
+			NumericVector v = listOfVectors[listOfVectors.size()-1];
+
+			const int num = m_vectorDouble.size();
+			int outPos = thread;
+
+			for (int i = 0 ; i < num ; i++, outPos += numThreads)
+				v[outPos] = m_vectorDouble[i];
+		}
+		break;
+	case String:
+		{
+			if (thread == 0)
+				listOfVectors.push_back(StringVector(totalEntries));
+
+			StringVector v = listOfVectors[listOfVectors.size()-1];
+
+			const int num = m_vectorString.size();
+			int outPos = thread;
+
+			for (int i = 0 ; i < num ; i++, outPos += numThreads)
+				v[outPos] = m_vectorString[i];
+		}
+		break;
+	default:
+		throw Rcpp::exception("Internal error: unknown m_vectorType in addColumnToList2");
+	}
+}
 
