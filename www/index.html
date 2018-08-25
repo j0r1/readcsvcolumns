@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+
+<title>read.csv.columns</title>
+
+<script type="text/javascript">
+window.onload = function() {
+  var imgs = document.getElementsByTagName('img'), i, img;
+  for (i = 0; i < imgs.length; i++) {
+    img = imgs[i];
+    // center an image if it is the only element of its parent
+    if (img.parentElement.childElementCount === 1)
+      img.parentElement.style.textAlign = 'center';
+  }
+};
+</script>
+
+
+
+
+
+<style type="text/css">
+body, td {
+   font-family: sans-serif;
+   background-color: white;
+   font-size: 13px;
+}
+
+body {
+  max-width: 800px;
+  margin: auto;
+  padding: 1em;
+  line-height: 20px;
+}
+
+tt, code, pre {
+   font-family: 'DejaVu Sans Mono', 'Droid Sans Mono', 'Lucida Console', Consolas, Monaco, monospace;
+}
+
+h1 {
+   font-size:2.2em;
+}
+
+h2 {
+   font-size:1.8em;
+}
+
+h3 {
+   font-size:1.4em;
+}
+
+h4 {
+   font-size:1.0em;
+}
+
+h5 {
+   font-size:0.9em;
+}
+
+h6 {
+   font-size:0.8em;
+}
+
+a:visited {
+   color: rgb(50%, 0%, 50%);
+}
+
+pre, img {
+  max-width: 100%;
+}
+pre {
+  overflow-x: auto;
+}
+pre code {
+   display: block; padding: 0.5em;
+}
+
+code {
+  font-size: 92%;
+  border: 1px solid #ccc;
+}
+
+code[class] {
+  background-color: #F8F8F8;
+}
+
+table, td, th {
+  border: none;
+}
+
+blockquote {
+   color:#666666;
+   margin:0;
+   padding-left: 1em;
+   border-left: 0.5em #EEE solid;
+}
+
+hr {
+   height: 0px;
+   border-bottom: none;
+   border-top-width: thin;
+   border-top-style: dotted;
+   border-top-color: #999999;
+}
+
+@media print {
+   * {
+      background: transparent !important;
+      color: black !important;
+      filter:none !important;
+      -ms-filter: none !important;
+   }
+
+   body {
+      font-size:12pt;
+      max-width:100%;
+   }
+
+   a, a:visited {
+      text-decoration: underline;
+   }
+
+   hr {
+      visibility: hidden;
+      page-break-before: always;
+   }
+
+   pre, blockquote {
+      padding-right: 1em;
+      page-break-inside: avoid;
+   }
+
+   tr, img {
+      page-break-inside: avoid;
+   }
+
+   img {
+      max-width: 100% !important;
+   }
+
+   @page :left {
+      margin: 15mm 20mm 15mm 10mm;
+   }
+
+   @page :right {
+      margin: 15mm 10mm 15mm 20mm;
+   }
+
+   p, h2, h3 {
+      orphans: 3; widows: 3;
+   }
+
+   h2, h3 {
+      page-break-after: avoid;
+   }
+}
+</style>
+
+
+
+</head>
+
+<body>
+<h1>read.csv.columns</h1>
+
+<p>This package provides a single function called <code>read.csv.columns</code>. Like other
+functions, this allows you to read data from a CSV file, but here you need to
+specify in advance what type each column is.</p>
+
+<h2>Usage</h2>
+
+<p>The signature of the function is</p>
+
+<pre><code>read.csv.columns(file.name, column.types, max.line.length=16384, has.header=TRUE)
+</code></pre>
+
+<p>where the meaning of the arguments is as follows:</p>
+
+<ul>
+<li><p><code>file.name</code>: the path to the CSV file</p></li>
+<li><p><code>column.types</code>: a string containing as many characters as there are columns in the
+CSV file. The allowed characters and their meanings are:</p>
+
+<ul>
+<li><code>i</code>: the column contains integers</li>
+<li><code>r</code>: the column contains real numbers</li>
+<li><code>s</code>: the column contains arbitrary strings</li>
+<li><code>.</code>: the column should be ignored</li>
+</ul></li>
+<li><p><code>max.line.length</code>: specifies an upper limit to the length of a line in the CSV file (the
+default is probably more than enough)</p></li>
+<li><p><code>has.header</code>: if set to <code>TRUE</code> (the default), the values of the first line are used as
+labels for the columns of the CSV file. If set to <code>FALSE</code>, the first line is also
+considered to consist of data values.</p></li>
+</ul>
+
+<p>The function returns a list where each entry corresponds to a column in the CSV file. The
+columns that were marked as &#39;ignored&#39;, are <em>not</em> present in this list.</p>
+
+</body>
+
+</html>

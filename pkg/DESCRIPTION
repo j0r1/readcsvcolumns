@@ -1,0 +1,15 @@
+Package: readcsvcolumns
+Type: Package
+Title: Read CSV, determine what type each column is
+Version: 1.0-0
+Date: 2014-12-31
+Author: Jori Liesenborgs
+Maintainer: Jori Liesenborgs <jori.liesenborgs@uhasselt.be>
+Description: Read an CSV file, but you need to specify in advance what
+    type each column is.
+License: GPL-2
+Imports: Rcpp (>= 0.11.3)
+LinkingTo: Rcpp
+Suggests: knitr
+VignetteBuilder: knitr
+

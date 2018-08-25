@@ -1,0 +1,3 @@
+useDynLib(readcsvcolumns)
+exportPattern("^[[:alpha:]]+")
+importFrom(Rcpp, evalCpp)

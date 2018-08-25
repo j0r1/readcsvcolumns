@@ -1,0 +1,48 @@
+---
+title: "read.csv.columns"
+author: "Jori Liesenborgs"
+date: "2014-12-31"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\usepackage[utf8]{inputenc}
+---
+
+read.csv.columns
+================
+
+This package provides a single function called `read.csv.columns`. Like other
+functions, this allows you to read data from a CSV file, but here you need to
+specify in advance what type each column is.
+
+Usage
+-----
+
+The signature of the function is
+
+    read.csv.columns(file.name, column.types, max.line.length=16384, has.header=TRUE)
+
+where the meaning of the arguments is as follows:
+
+ - `file.name`: the path to the CSV file
+
+ - `column.types`: a string containing as many characters as there are columns in the
+   CSV file. The allowed characters and their meanings are:
+
+    - `i`: the column contains integers
+    - `r`: the column contains real numbers
+    - `s`: the column contains arbitrary strings
+    - `.`: the column should be ignored
+
+ - `max.line.length`: specifies an upper limit to the length of a line in the CSV file (the
+   default is probably more than enough)
+
+ - `has.header`: if set to `TRUE` (the default), the values of the first line are used as
+   labels for the columns of the CSV file. If set to `FALSE`, the first line is also
+   considered to consist of data values.
+
+The function returns a list where each entry corresponds to a column in the CSV file. The
+columns that were marked as 'ignored', are _not_ present in this list.
+
+
