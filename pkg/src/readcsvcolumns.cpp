@@ -345,6 +345,17 @@ string GetColumnSpecAndColumnNames(string fileName, FILE *pFile, string columnSp
 
 	if (hasHeaders)
 		names = parts;
+	else // Use default column names
+	{
+		char tmp[1024];
+		
+		names.clear();
+		for (int i = 1 ; i <= (int)parts.size() ; i++)
+		{
+			sprintf(tmp, "col_%03d", i);
+			names.push_back(tmp);
+		}
+	}
 
 	return columnSpec;
 }
@@ -476,15 +487,15 @@ List ReadCSVColumns(string fileName, string columnSpec, int maxLineLength, bool 
 		{
 			if (!columns[i].ignore())
 			{
-				if (hasHeaders)
-					nameVec.push_back(names[i]);
+				//if (hasHeaders)
+				nameVec.push_back(names[i]);
 
 				columns[i].addColumnToList(listOfVectors);
 			}
 		}
 
-		if (hasHeaders)
-			listOfVectors.attr("names") = nameVec;
+		//if (hasHeaders)
+		listOfVectors.attr("names") = nameVec;
 	}
 	else // Parallel version using mmap and openmp
 	{
@@ -588,16 +599,16 @@ List ReadCSVColumns(string fileName, string columnSpec, int maxLineLength, bool 
 		{
 			if (!threadColumns[0][i].ignore()) // It's ignored in all threads
 			{
-				if (hasHeaders)
-					nameVec.push_back(names[i]);
+				//if (hasHeaders)
+				nameVec.push_back(names[i]);
 
 				for (int t = 0 ; t < numThreads ; t++)
 					threadColumns[t][i].addColumnToList(listOfVectors, numThreads, t, totalEntries);
 			}
 		}
 
-		if (hasHeaders)
-			listOfVectors.attr("names") = nameVec;
+		//if (hasHeaders)
+		listOfVectors.attr("names") = nameVec;
 
 		// Clean up threads
 		for (int i = 0 ; i < numThreads ; i++)
