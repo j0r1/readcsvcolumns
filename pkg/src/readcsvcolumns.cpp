@@ -1,3 +1,7 @@
+#ifdef _WIN32
+#include <windows.h>
+#endif // _WIN32
+
 #include <Rcpp.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -5,6 +9,12 @@
 #include <vector>
 #include <string>
 #include <iostream>
+
+#ifdef _WIN32
+#define STRTOK_R strtok_s
+#else
+#define STRTOK_R strtok_r
+#endif // _WIN32
 
 using namespace std;
 using namespace Rcpp;
@@ -140,7 +150,7 @@ List ReadCSVColumns(string fileName, string columnSpec, int maxLineLength, bool 
 
 		for (int i = 0 ; i < numCols ; i++)
 		{
-			char *pPart = strtok_r(pBuff, ",", &pPtr);
+			char *pPart = STRTOK_R(pBuff, ",", &pPtr);
 			pBuff = 0;
 
 			if (!pPart)
@@ -494,8 +504,33 @@ bool ValueVector::parseAsDouble(const char *pStr, double &value)
 	const char *endptr2 = skipWhite(endptr);
 
 	if (*endptr2 != '\0')
+	{
+		// Try to compensate for things like 1.#INF on windows
+		// Will not strictly be correct since we've already skipped
+		// whitespace, so '1.    #INF' will also be detected as
+		// infinity
+		if (endptr2[0] == '#' && endptr2[1] == 'I' && endptr2[2] == 'N')
+		{
+			if (endptr2[3] == 'F') // #INF
+			{
+				// assume its +/- inf, without further checking
+				if (value < 0)
+				{
+					value = -std::numeric_limits<double>::infinity();
+					return true;
+				}
+				value = std::numeric_limits<double>::infinity();
+				return true;
+			}
+			if (endptr2[3] == 'D') // #IND
+			{
+				// Assume it's NaN
+				value = std::numeric_limits<double>::quiet_NaN();
+				return true;
+			}
+		}
 		return false;
-	
+	}
 	return true;
 }
 
